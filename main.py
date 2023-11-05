@@ -5,8 +5,9 @@ import sqlite3
 from utils import *
 import copy
 import time
-
-DEPTH = 5
+import math
+import random
+DEPTH = 6
 class Checkers:
     def __init__(self):
         self.cb = \
@@ -291,62 +292,130 @@ class Checkers:
                 self.black = "Black"
 
         return None
+
+
+def calculate_heuristics(instance):
+        board = instance.cb
+        black = 1
+        red = 2
+        kingblack = 3
+        kingred = 4
+
+        h1 = 0
+        h2 = 0
+        hrand = random.randint(0,99) # Randomization component
+        for i in range(8):
+            for j in range(8):
+                if (board[i][j] == black):
+                    h1 -= 3
+                    h2 -= (i-0)
+                elif (board[i][j] == kingblack):
+                    h1 -= 5
+                elif (board[i][j] == red):
+                    h1 += 3
+                    h2 += (7-i)
+                elif (board[i][j] == kingred):
+                    h1 += 5
+        score = h1*10000+h2*100+hrand
+        print("Heuristic:",score)
+        return score
+        
+
+
+def doAlphaBetaSearch(instance, levels, alpha, beta):
+    #if (instance.winner == "Black"):
+    #    return (-99999999+cur_depth)
+    #if (instance.winner == "Red"):
+    #    return (99999999-cur_depth)
     
-def doAlphaBetaSearch(instance, levels, alpha, beta, current_score,cur_depth):
-    if (instance.winner == "Black"):
-        return (None, -99999999+cur_depth)
-    if (instance.winner == "Red"):
-        return (None, 99999999-cur_depth)
-    
-    if (levels == 0):
-        return (None, current_score)
+    if (levels == 0 or instance.winner != None):
+        return calculate_heuristics(instance)
     moves = instance.getAllMoves()
     jumps = instance.getAllJumps()
     best_move = None
     old_counts = instance.countPieces()
-
     best_score = 0
     if (instance.turn == 1):
-        best_score = 1000000
+        best_score = math.inf
     else:
-        best_score = -1000000
+        best_score = -math.inf
     if len(jumps) != 0:
         for jump in jumps:
             new_instance = copy.deepcopy(instance)
             new_instance.makeMoveSilent(jump[0],jump[1],jump[2],jump[3])
-            new_counts = new_instance.countPieces()
+            # Black's turn
             if (instance.turn == 1):
-                pieces = old_counts['red'] - new_counts['red']
-                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta, current_score-pieces,cur_depth+1)[1]
-                if (score < best_score):
-                    best_move = jump
+                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta)
+
                 best_score = min(score, best_score)
+                beta = min(beta, best_score)
+                if (beta <= alpha):
+                    print("pruning")
+                    break
             else:
-                pieces = old_counts['black'] - new_counts['black']
-                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta, current_score+pieces,cur_depth+1)[1]
-                if (score > best_score):
-                    best_move = jump
+            # Red's turn
+                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta)
                 best_score = max(score, best_score)
+                alpha = max(alpha, best_score)
+                if (beta <= alpha):
+                    print("pruning")
+                    break
     else:
         for move in moves:
             new_instance = copy.deepcopy(instance)
             new_instance.makeMoveSilent(move[0],move[1],move[2],move[3])
-            new_counts = new_instance.countPieces()
             if (instance.turn == 1):
-                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta, current_score,cur_depth+1)[1]
-                if (score < best_score):
-                    best_move = move
+                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta)
+
                 best_score = min(score, best_score)
+                beta = min(beta, best_score)
+                if (beta <= alpha):
+                    print("pruning")
+                    break
             else:
-                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta, current_score,cur_depth+1)[1]
-                if (score > best_score):
-                    best_move = move
+                score = doAlphaBetaSearch(new_instance, levels-1,alpha,beta)
                 best_score = max(score, best_score)
+                alpha = max(alpha, best_score)
+                if (beta <= alpha):
+                    print("pruning")
+                    break
+    return best_score
+
+def getBestMoveBlack(instance, levels):
+    #if (instance.winner == "Black"):
+    #    return (-99999999+cur_depth)
+    #if (instance.winner == "Red"):
+    #    return (99999999-cur_depth)
+    
+    if (levels == 0):
+        return calculate_heuristics(instance)
+    moves = instance.getAllMoves()
+    jumps = instance.getAllJumps()
+
+    best_score = math.inf
+    best_move = None
+    if len(jumps) != 0:
+        for move in jumps:
+            new_instance = copy.deepcopy(instance)
+            new_instance.makeMoveSilent(move[0],move[1],move[2],move[3])
+            score = min(best_score,doAlphaBetaSearch(new_instance,levels-1,-math.inf,math.inf))
+            if (score < best_score):
+                best_move = move
+                best_score = score
+    else:
+        for move in moves:
+            new_instance = copy.deepcopy(instance)
+            new_instance.makeMoveSilent(move[0],move[1],move[2],move[3])
+            score = min(best_score, doAlphaBetaSearch(new_instance,levels-1,-math.inf,math.inf))
+            if (score < best_score):
+                best_move = move
+                best_score = score
     return (best_move, best_score)
 class CheckerApp:
     def __init__(self):
 
         self.checkers = Checkers()
+        self.trail = [[0 for _ in range(8)] for _ in range(8)]
         self.selectCell = (-1,-1)        
         self.db = sqlite3.connect("sessionLog.db")
         try:
@@ -360,20 +429,20 @@ class CheckerApp:
         self.currentrowid = cur.lastrowid
 
         print("Inserting new row ID:",self.currentrowid)
-        win = Tk()
-        win.title("Checkers - AP Project")
-        win.geometry("500x600")
+        self.win = Tk()
+        self.win.title("Checkers - AP Project")
+        self.win.geometry("500x600")
         self.buttons = []
-        self.buttonFrame = Frame(win)
+        self.buttonFrame = Frame(self.win)
 
-        self.label = Label(win,text="Turn: Red")
-        self.scoreLabel = Label(win,text="")
-        self.text_area = ScrolledText(win,
+        self.label = Label(self.win,text="Turn: Red")
+        self.scoreLabel = Label(self.win,text="")
+        self.text_area = ScrolledText(self.win,
                             width = 75, 
                             height = 6, 
                             font = ("Times New Roman",
                                     10))
-        self.historyButton = Button(win, text="Dump DB History",command=self.dumpLog)        
+        self.historyButton = Button(self.win, text="Dump DB History",command=self.dumpLog)        
         fillFunc = (lambda: 'black' if (toggle == 0) else  'red')
         
         superToggle = 0
@@ -399,7 +468,7 @@ class CheckerApp:
         self.historyButton.pack()
         self.refreshBoard()
         self.refreshPieceCount()
-        win.mainloop()
+        self.win.mainloop()
 
     def addButton(self,text, cmd,i,j):
         b = Button(self.buttonFrame,text =text,command = lambda:self.selectCells(i,j),width=4,height=2,font = 'Helvetica 10')
@@ -411,20 +480,16 @@ class CheckerApp:
         self.text_area.see("end")
 
     def selectCells(self,i,j):
+        if (self.checkers.turn != 2):
+            return
         if (self.selectCell == (-1,-1)):
             self.logMessage("Cell selected:"+'('+str(i)+','+str(j)+')')
             self.selectCell = (i,j)
             self.buttons[i*8+j]['font'] = 'Helvetica 10 underline'
         else:
             res = self.checkers.makeMove(self.selectCell[0],self.selectCell[1],i,j,self)
-            self.refreshBoard()
-            self.refreshPieceCount()
-            while (self.checkers.turn == 1 and self.checkers.winner is None):
-                (best_move, best_score) = doAlphaBetaSearch(self.checkers, DEPTH, 0,0,0,0)
-                self.logMessage("Computer making move:"+str(best_move)+"with score"+str(best_score))
-                self.checkers.makeMove(best_move[0],best_move[1],best_move[2],best_move[3],self)
-                self.refreshBoard()
-                self.refreshPieceCount()
+            if (self.checkers.turn == 1 and self.checkers.winner is None):
+                self.win.after(2000,lambda: self.AIMove())
             if (res is None):
                 self.buttons[self.selectCell[0]*8+self.selectCell[1]]['font'] = 'Helvetica 10'
                 self.selectCell = (-1,-1)
@@ -432,33 +497,45 @@ class CheckerApp:
             else:
                 self.buttons[self.selectCell[0]*8+self.selectCell[1]]['font'] = 'Helvetica 10'
                 self.selectCell = (-1,-1)
-                
-
             self.refreshBoard()
             self.refreshPieceCount()
 
+
+    def AIMove(self):
+        self.trail = [[0 for _ in range(8)] for _ in range(8)]
+        while (self.checkers.turn == 1 and self.checkers.winner is None):
+            (best_move, best_score) = getBestMoveBlack(self.checkers, DEPTH)
+            self.logMessage("Computer making move:"+str(best_move)+"with score"+str(best_score))
+            self.checkers.makeMove(best_move[0],best_move[1],best_move[2],best_move[3],self)
+            self.trail[best_move[0]][best_move[1]] = 1
+            self.trail[best_move[2]][best_move[3]] = 2
+
+        self.refreshBoard()
+        self.refreshPieceCount()
     def refreshBoard(self):
-        i = 0
-        while i < 8:
-            j = 0
-            while j < 8:
+        for i in range(8):
+            for j in range(8):
                 piece = self.checkers.cb[i][j]
+                prefix = ''
+                if (self.trail[i][j] == 2):
+                    prefix = '-'
                 if piece == 2:
                     self.buttons[i*8+j]['fg'] = 'red'
                     self.buttons[i*8+j]['text'] = 'O'
                 elif piece == 1:
                     self.buttons[i*8+j]['fg'] = 'black'
-                    self.buttons[i*8+j]['text'] = 'O'
+                    self.buttons[i*8+j]['text'] = prefix+'O'+prefix
                 elif piece == 4:
                     self.buttons[i*8+j]['fg'] = 'red'
                     self.buttons[i*8+j]['text'] = 'Q'
                 elif piece == 3:
                     self.buttons[i*8+j]['fg'] = 'black'
-                    self.buttons[i*8+j]['text'] = 'Q'               
+                    self.buttons[i*8+j]['text'] = prefix+'Q'+prefix
+                elif self.trail[i][j] == 1:
+                    self.buttons[i*8+j]['fg'] = 'brown'
+                    self.buttons[i*8+j]['text'] = 'o'              
                 else:
                     self.buttons[i*8+j]['text'] = ' '
-                j += 1
-            i += 1
         if self.checkers.winner is not None:
             self.label['text'] = "Winner: " + self.checkers.winner
             self.logMessage("Winner: "+self.checkers.winner)
